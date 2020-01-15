@@ -11283,6 +11283,23 @@ Controller.prototype = {
 		this.req.body = val;
 	},
 
+	// Eklenenler
+	get get() {
+		return this.req.query;
+	},
+
+	set get(val) {
+		this.req.query = val;
+	},
+
+	get post() {
+		return this.req.body;
+	},
+
+	set post(val) {
+		this.req.body = val;
+	},
+
 	get files() {
 		return this.req.files;
 	},
@@ -15040,6 +15057,7 @@ WebSocketProto.ping = function() {
  */
 WebSocketProto.close = function(id, message, code) {
 
+	F.consoledebug(`${id} websocket kapandı: ${code}`);
 	var keys = this._keys;
 
 	if (!keys)
