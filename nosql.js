@@ -102,7 +102,6 @@ function clusterlock(db, method) {
 			});
 		});
 	});
-
 }
 
 function clusterunlock(db) {
@@ -536,12 +535,12 @@ exports.worker = function() {
 	};
 };
 
-function Table(name, filename, readonly) {
+function Table(name, filename, readonly, specific) {
 	var t = this;
-	t.filename = readonly ? filename : filename + EXTENSION_TABLE;
+	t.filename = readonly ? filename : filename + (specific ? '' : EXTENSION_TABLE);
 	t.filenameBackup = readonly ? '' : filename + EXTENSION_TABLE_BACKUP;
-	t.filenameCounter = readonly ? '' : filename + EXTENSION_TABLE + EXTENSION_COUNTER;
-	t.filenameMeta = readonly ? '' : filename + EXTENSION_TABLE + '-meta';
+	t.filenameCounter = readonly ? '' : filename + (specific ? '' : EXTENSION_TABLE) + EXTENSION_COUNTER;
+	t.filenameMeta = readonly ? '' : filename + (specific ? '' : EXTENSION_TABLE) + '-meta';
 	t.directory = Path.dirname(filename);
 	t.filenameLock = t.filename + '-lock';
 	t.name = name;
@@ -612,22 +611,22 @@ function Table(name, filename, readonly) {
 	});
 }
 
-function Database(name, filename, readonly) {
+function Database(name, filename, readonly, specific) {
 
 	var self = this;
 	var http = filename.substring(0, 6);
 	self.readonly = http === 'http:/' || http === 'https:';
-	self.filename = self.readonly ? filename.format('') : readonly ? filename : filename + EXTENSION;
+	self.filename = self.readonly ? filename.format('') : readonly ? filename : filename + (specific ? '' : EXTENSION);
 	self.directory = Path.dirname(filename);
 
 	if (!readonly) {
 		self.filenameLock = self.filename + '-lock';
-		self.filenameCounter = self.readonly ? filename.format('counter', '-') : filename + EXTENSION + EXTENSION_COUNTER;
+		self.filenameCounter = self.readonly ? filename.format('counter', '-') : filename + (specific ? '' : EXTENSION) + EXTENSION_COUNTER;
 		self.filenameLog = self.readonly || readonly ? '' : filename + EXTENSION_LOG;
 		self.filenameBackup = self.readonly || readonly ? '' : filename + EXTENSION_BACKUP;
-		self.filenameStorage = self.readonly || readonly ? '' : filename + '-storage/{0}' + EXTENSION;
+		self.filenameStorage = self.readonly || readonly ? '' : filename + '-storage/{0}' + (specific ? '' : EXTENSION);
 		self.filenameMeta = filename + EXTENSION_META;
-		self.filenameBackup2 = framework_utils.join(self.directory, name + '_backup' + EXTENSION);
+		self.filenameBackup2 = framework_utils.join(self.directory, name + '_backup' + (specific ? '' : EXTENSION));
 		self.inmemory = {};
 		self.inmemorylastusage;
 		// self.metadata;
@@ -738,12 +737,12 @@ exports.DatabaseBinary = Binary;
 exports.DatabaseStorage = Storage;
 exports.DatabaseTable = Table;
 
-exports.load = function(name, filename) {
-	return new Database(name, filename);
+exports.load = function(name, filename, specific) {
+	return new Database(name, filename, undefined, specific);
 };
 
-exports.table = function(name, filename) {
-	return new Table(name, filename);
+exports.table = function(name, filename, specific) {
+	return new Table(name, filename, undefined, specific);
 };
 
 exports.memory = exports.inmemory = function(name) {
@@ -2276,8 +2275,7 @@ DatabaseBuilder.prototype.$callbackjoin = function(callback) {
 				unique.add(val);
 		}
 
-		var isTable = self.db instanceof Table;
-		var db = join.table ? TABLE(join.name) : NOSQL(join.name);
+		var db = join.instance ? join.instance : (self.db instanceof Table ? TABLE(join.name) : NOSQL(join.name));
 
 		if (join.scalartype) {
 			join.items = [];
@@ -2312,15 +2310,15 @@ DatabaseBuilder.prototype.$callbackjoin = function(callback) {
 		} else {
 
 			if (unique.size) {
+
 				join.builder.$options.fields && join.builder.$options.fields.push(join.a);
 				join.builder.$callback = function(err, docs) {
 					join.items = docs;
 					next();
 				};
-				if (isTable)
-					db.find(join.builder).in(join.a, Array.from(unique));
-				else
-					db.find(join.builder).in(join.a, Array.from(unique));
+
+				db.find(join.builder).in(join.a, Array.from(unique));
+
 			} else {
 				join.items = join.builder.$options.first ? null : [];
 				next();
@@ -2423,11 +2421,14 @@ DatabaseBuilder.prototype.join = function(field, name) {
 		self.$join = {};
 
 	var table = self.db instanceof Table;
+	var instance;
 
 	if (name instanceof Database) {
+		instance = name;
 		name = name.name;
 		table = false;
 	} else if (name instanceof Table) {
+		instance = name;
 		table = true;
 		name = name.name;
 	}
@@ -2441,6 +2442,7 @@ DatabaseBuilder.prototype.join = function(field, name) {
 	item.field = field;
 	item.name = name;
 	item.table = table;
+	item.instance = instance;
 	item.builder = join = new DatabaseBuilder(self.db);
 
 	join.on = function(a, b) {
@@ -2452,7 +2454,6 @@ DatabaseBuilder.prototype.join = function(field, name) {
 		self.$join[key].b = b;
 
 		self.$keys && self.$keys.push(b);
-
 		return join;
 	};
 
@@ -4707,7 +4708,7 @@ Binary.prototype.meta = function(id, callback, count) {
 	return self;
 };
 
-Binary.prototype.res = function(res, options, notmodified) {
+Binary.prototype.res = function(res, options, checkcustom, notmodified) {
 
 	var self = this;
 	var isnew = false;
@@ -4745,7 +4746,16 @@ Binary.prototype.res = function(res, options, notmodified) {
 	stream.on('data', function(buffer) {
 		var json = buffer.toString('utf8').replace(REGCLEAN, '');
 		if (json) {
+
 			var obj = JSON.parse(json, jsonparser);
+
+			if (checkcustom && checkcustom(obj) == false) {
+				if (RELEASE)
+					F.temporary.notfound[F.createTemporaryKey(req)] = true;
+				res.throw404();
+				return;
+			}
+
 			var utc = obj.date ? new Date(+obj.date.substring(0, 4), +obj.date.substring(4, 6), +obj.date.substring(6, 8)).toUTCString() : '';
 
 			if (!options.download && req.headers['if-modified-since'] === utc) {
@@ -7251,7 +7261,6 @@ DatabaseBuilder.prototype.gridfilter = function(name, obj, type, key) {
 		var arr = value.split(',');
 
 		if (type === undefined || type === String) {
-			console.log(arr);
 			builder.or();
 			for (var i = 0, length = arr.length; i < length; i++) {
 				var item = arr[i].trim();
@@ -7303,6 +7312,159 @@ DatabaseBuilder.prototype.gridsort = function(sort) {
 		index = sort.lastIndexOf(' ');
 	builder.sort(sort.substring(0, index), sort[index + 1] === 'd');
 	return builder;
+};
+
+DatabaseBuilder.prototype.autofill = function($, allowedfields, skipfilter, defsort, maxlimit, localized) {
+
+	if (typeof(defsort) === 'number') {
+		maxlimit = defsort;
+		defsort = null;
+	}
+
+	var self = this;
+	var query = $.query || $.options;
+	var schema = $.schema;
+	var skipped;
+	var allowed;
+	var key;
+	var tmp;
+
+	if (skipfilter) {
+		key = 'NDB_' + skipfilter;
+		skipped = CACHE[key];
+		if (!skipped) {
+			tmp = skipfilter.split(',').trim();
+			var obj = {};
+			for (var i = 0; i < tmp.length; i++)
+				obj[tmp[i]] = 1;
+			skipped = CACHE[key] = obj;
+		}
+	}
+
+	if (allowedfields) {
+		key = 'NDB_' + allowedfields;
+		allowed = CACHE[key];
+		if (!allowed) {
+			var obj = {};
+			var arr = [];
+			var filter = [];
+
+			if (localized)
+				localized = localized.split(',');
+
+			tmp = allowedfields.split(',').trim();
+			for (var i = 0; i < tmp.length; i++) {
+				var k = tmp[i].split(':').trim();
+				obj[k[0]] = 1;
+
+				if (localized && localized.indexOf(k[0]) !== -1)
+					arr.push(k[0] + '§');
+				else
+					arr.push(k[0]);
+
+				k[1] && filter.push({ name: k[0], type: (k[1] || '').toLowerCase() });
+			}
+			allowed = CACHE[key] = { keys: arr, meta: obj, filter: filter };
+		}
+	}
+
+	var fields = query.fields;
+	var fieldscount = 0;
+	var opt = self.$options;
+
+	if (!opt.fields)
+		opt.fields = [];
+
+	if (fields) {
+		fields = fields.replace(REG_FIELDS_CLEANER, '').split(',');
+		for (var i = 0; i < fields.length; i++) {
+			var field = fields[i];
+			if (allowed && allowed.meta[field]) {
+				opt.fields.push(fields[i]);
+				fieldscount++;
+			} else if (schema.schema[field]) {
+				if (skipped && skipped[field])
+					continue;
+				opt.fields.push(field);
+				fieldscount++;
+			}
+		}
+	}
+
+	if (!fieldscount) {
+		if (allowed) {
+			for (var i = 0; i < allowed.keys.length; i++)
+				opt.fields.push(allowed.keys[i]);
+		}
+		if (schema.fields) {
+			for (var i = 0; i < schema.fields.length; i++) {
+				if (skipped && skipped[schema.fields[i]])
+					continue;
+				opt.fields.push(schema.fields[i]);
+			}
+		}
+	}
+
+	if (allowed && allowed.filter) {
+		for (var i = 0; i < allowed.filter.length; i++) {
+			tmp = allowed.filter[i];
+			self.gridfilter(tmp.name, query, tmp.type);
+		}
+	}
+
+	if (schema.fields) {
+		for (var i = 0; i < schema.fields.length; i++) {
+			var name = schema.fields[i];
+			if ((!skipped || !skipped[name]) && query[name]) {
+				var field = schema.schema[name];
+				var type = 'string';
+				switch (field.type) {
+					case 2:
+						type = 'number';
+						break;
+					case 4:
+						type = 'boolean';
+						break;
+					case 5:
+						type = 'date';
+						break;
+				}
+				self.gridfilter(name, query, type);
+			}
+		}
+	}
+
+	if (query.sort) {
+		var index = query.sort.lastIndexOf('_');
+		if (index !== -1) {
+			var name = query.sort.substring(0, index);
+			var can = true;
+
+			if (skipped && skipped[name])
+				can = false;
+
+			if (can && allowed && !allowed.meta[name])
+				can = false;
+
+			if (can && !allowed) {
+				if (!schema.schema[name])
+					can = false;
+			} else if (!can)
+				can = !!schema.schema[name];
+
+			if (can)
+				self.sort(name, query.sort[index + 1] === 'd');
+			else if (defsort)
+				self.gridsort(defsort);
+
+		} else if (defsort)
+			self.gridsort(defsort);
+
+	} else if (defsort)
+		self.gridsort(defsort);
+
+	maxlimit && self.paginate(query.page, query.limit, maxlimit || 50);
+	return self;
 };
 
 function cluster_send(obj) {

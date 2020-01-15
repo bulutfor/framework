@@ -666,6 +666,20 @@ function HttpFile() {
 	this.rem = true;
 }
 
+HttpFile.prototype = {
+	get size() {
+		return this.length;
+	},
+	get extension() {
+		if (!this.$extension)
+			this.$extension = framework_utils.getExtension(this.filename);
+		return this.$extension;
+	},
+	set extension(val) {
+		this.$extension = val;
+	}
+};
+
 var HFP = HttpFile.prototype;
 
 HFP.rename = HFP.move = function(filename, callback) {
@@ -1766,10 +1780,6 @@ function view_parse(content, minify, filename, controller) {
 		if (!value)
 			return '$EMPTY';
 
-		if (!minify) {
-
-		}
-
 		if (!nocompressHTML && is)
 			value += ' ';
 
@@ -2108,6 +2118,7 @@ function view_prepare(command, dynamicCommand, functions, controller, components
 		case 'repository':
 		case 'query':
 		case 'global':
+		case 'MAIN':
 		case 'session':
 		case 'user':
 		case 'config':

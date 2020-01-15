@@ -1,3 +1,65 @@
+======= 3.3.3
+
+- added: `date.setTimeZone(timezone)`
+- added: `NOSQL('~absolute_path.nosql')' loads external NoSQL embedded database
+- added: `TABLE('~absolute_path.nosql')' loads external Table
+- added: `(generate)` subtype into the `config` files
+- added: `String.isBase64()`
+- added: new schema type `Base64`
+- added: SchemaEntity supports `schema.addWorkflowExtension(name, fn($, [data]))`
+- added: SchemaEntity supports `schema.addTransformExtension(name, fn($, [data]))`
+- added: SchemaEntity supports `schema.addOperationExtension(name, fn($, [data]))`
+- added: SchemaEntity supports `schema.addHookExtension(name, fn($, [data]))`
+- added: SchemaEntity supports `schema.setSaveExtension(fn($, [data]))`
+- added: SchemaEntity supports `schema.setReadExtension(fn($, [data]))`
+- added: SchemaEntity supports `schema.setQueryExtension(fn($, [data]))`
+- added: SchemaEntity supports `schema.setRemoveExtension(fn($, [data]))`
+- added: SchemaEntity supports `schema.setInsertExtension(fn($, [data]))`
+- added: SchemaEntity supports `schema.setUpdateExtension(fn($, [data]))`
+- added: SchemaEntity supports `schema.setPatchExtension(fn($, [data]))`
+- added: SchemaOptions supports `$.extend([data])` for evaluating of all extensions for the current operation
+- added: `WebSocket.keys` property (it contains all keys with connections)
+- added: `threads` directory for server-less functionality
+- added: a global variable called `THREAD` with a name of current thread
+- added: `require('total.js').http(..., { thread: 'thread_name' })` evaluates only specified thread
+- added: `require('total.js').cluster.http(..., { thread: 'thread_name' })` evaluates only specified thread in cluster
+- added: framework creates a file with app stats in the form `your_init_script_name.js.json`
+- added: a new config key `allow_stats_snapshot`
+- added: view engine `@{import()}` supports auto-merging JS or CSS files: `@{import('default.js + ui.js')}`
+- added: `exports.options` delegate to component in `FLOWSTREAM`
+- added: `DatabaseBuilder.autofill()` from DBMS
+- added: `HttpFile.extension` property
+- added: `HttpFile.size` property alias to `HttpFile.length`
+- added: auto-session cleaner of unused sessions
+- added: `allow_sessions_unused` config key for cleaning of unused sessions
+- added: missing `PATH.schemas`, `PATH.operations` and `PATH.tasks`
+
+- updated: `WEBSOCKET()` supports `+`, `-` and `🔒` as authorization flags
+- updated: `LOAD()` supports `service` type
+- updated: cluster watches `restart` or `restart_NAME_of_THREAD` files for restarting of existing threads
+- updated: cluster supports `auto` mode
+- updated: cluster supports watcher in `debug` mode
+- updated: `*.filefs()`, `*.filenosql()`, `*.imagefs()`, `*.imagenosql()` by adding `checkmeta` argument
+
+- fixed: `ON('error404')` when the route doens't exist
+- fixed: `filter` in Schema `workflows`, `transformations` and `operations`
+- fixed: `NOSQL()` joins with absolute paths
+- fixed: `TABLE()` joins with absolute paths
+- fixed: `(random)` subtype in `config` files
+- fixed: `(response)` phrase in `ROUTE()` for multiple `OPERATIONS`
+- fixed: a response in `ROUTE()` with mulitple operations if the result contained some error
+- fixed: a security bug with a path traversal vulnerability
+- fixed: `debug` watcher for `themes`
+- fixed: `generators` in schemas with a new declaration
+- fixed: a problem with handling files in 404 action
+
+- improved: `LOGMAIL()` mail format
+- improved: starting logs in console output (added IPv4 local address)
+
+======= 3.3.2
+
+- fixed: default time zone (`utc` is default time zone)
+
 ======= 3.3.1
 
 - added: `RESTBuilder.callback()` which performs `.exec()` automatically

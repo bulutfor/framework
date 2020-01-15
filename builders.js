@@ -21,7 +21,7 @@
 
 /**
  * @module FrameworkBuilders
- * @version 3.3.0
+ * @version 3.3.3
  */
 
 'use strict';
@@ -31,7 +31,7 @@ const DEFAULT_SCHEMA = 'default';
 const SKIP = { $$schema: 1, $$async: 1, $$repository: 1, $$controller: 1, $$workflow: 1, $$parent: 1, $$keys: 1 };
 const REGEXP_CLEAN_EMAIL = /\s/g;
 const REGEXP_CLEAN_PHONE = /\s|\.|-|\(|\)/g;
-const REGEXP_NEWOPERATION = /^(async\s)?function(\s)?\([a-zA-Z$\s]+\)|^function anonymous\(\$|^\([a-zA-Z$\s]+\)/;
+const REGEXP_NEWOPERATION = /^(async\s)?function(\s)?\([a-zA-Z$\s]+\)|^function anonymous\(\$|^\([a-zA-Z$\s]+\)|^function\*\(\$|^\([a-zA-Z$\s]+\)/;
 const hasOwnProperty = Object.prototype.hasOwnProperty;
 const Qs = require('querystring');
 const MSG_OBSOLETE_NEW = 'You used older declaration of this delegate and you must rewrite it. Read more in docs.';
@@ -227,6 +227,16 @@ SchemaOptionsProto.cancel = function() {
 	return self;
 };
 
+SchemaOptionsProto.extend = function(data) {
+	var self = this;
+	var ext = self.schema.extensions[self.name];
+	if (ext) {
+		for (var i = 0; i < ext.length; i++)
+			ext[i](self, data);
+		return true;
+	}
+};
+
 SchemaOptionsProto.redirect = function(url) {
 	this.callback(new F.callback_redirect(url));
 	return this;
@@ -411,6 +421,7 @@ function SchemaBuilderEntity(parent, name) {
 	this.properties = [];
 	this.inherits = [];
 	this.resourcePrefix;
+	this.extensions = {};
 	this.resourceName;
 	this.transforms;
 	this.workflows;
@@ -936,6 +947,13 @@ SchemaBuilderEntityProto.$parse = function(name, value, required, custom) {
 		return parseLength(lower, result);
 	}
 
+	if (lower.indexOf('base64') !== -1) {
+		result.type = 3;
+		result.raw = 'string';
+		result.subtype = 'base64';
+		return result;
+	}
+
 	if ((/^(upper|uppercase)+(\(\d+\))?$/).test(lower)) {
 		result.subtype = 'uppercase';
 		result.type = 3;
@@ -1110,6 +1128,15 @@ SchemaBuilderEntityProto.setSave = function(fn, description, filter) {
 	return this;
 };
 
+SchemaBuilderEntityProto.setSaveExtension = function(fn) {
+	var key = 'save';
+	if (this.extensions[key])
+		this.extensions[key].push(fn);
+	else
+		this.extensions[key] = [fn];
+	return this;
+};
+
 /**
  * Set insert handler
  * @param {Function(error, model, helper, next(value), controller)} fn
@@ -1127,6 +1154,15 @@ SchemaBuilderEntityProto.setInsert = function(fn, description, filter) {
 	this.meta.insert = description || null;
 	this.meta.insertfilter = filter;
 	!fn.$newversion && OBSOLETE('Schema("{0}").setInsert()'.format(this.name), MSG_OBSOLETE_NEW);
+	return this;
+};
+
+SchemaBuilderEntityProto.setInsertExtension = function(fn) {
+	var key = 'insert';
+	if (this.extensions[key])
+		this.extensions[key].push(fn);
+	else
+		this.extensions[key] = [fn];
 	return this;
 };
 
@@ -1150,6 +1186,15 @@ SchemaBuilderEntityProto.setUpdate = function(fn, description, filter) {
 	return this;
 };
 
+SchemaBuilderEntityProto.setUpdateExtension = function(fn) {
+	var key = 'update';
+	if (this.extensions[key])
+		this.extensions[key].push(fn);
+	else
+		this.extensions[key] = [fn];
+	return this;
+};
+
 /**
  * Set patch handler
  * @param {Function(error, model, helper, next(value), controller)} fn
@@ -1166,6 +1211,15 @@ SchemaBuilderEntityProto.setPatch = function(fn, description, filter) {
 	this.meta.patch = description || null;
 	this.meta.patchfilter = filter;
 	!fn.$newversion && OBSOLETE('Schema("{0}").setPatch()'.format(this.name), MSG_OBSOLETE_NEW);
+	return this;
+};
+
+SchemaBuilderEntityProto.setPatchExtension = function(fn) {
+	var key = 'patch';
+	if (this.extensions[key])
+		this.extensions[key].push(fn);
+	else
+		this.extensions[key] = [fn];
 	return this;
 };
 
@@ -1199,6 +1253,15 @@ SchemaBuilderEntityProto.setGet = SchemaBuilderEntityProto.setRead = function(fn
 	return this;
 };
 
+SchemaBuilderEntityProto.setGetExtension = SchemaBuilderEntityProto.setReadExtension = function(fn) {
+	var key = 'read';
+	if (this.extensions[key])
+		this.extensions[key].push(fn);
+	else
+		this.extensions[key] = [fn];
+	return this;
+};
+
 /**
  * Set query handler
  * @param {Function(error, helper, next(value), controller)} fn
@@ -1221,6 +1284,15 @@ SchemaBuilderEntityProto.setQuery = function(fn, description, filter) {
 	return this;
 };
 
+SchemaBuilderEntityProto.setQueryExtension = function(fn) {
+	var key = 'query';
+	if (this.extensions[key])
+		this.extensions[key].push(fn);
+	else
+		this.extensions[key] = [fn];
+	return this;
+};
+
 /**
  * Set remove handler
  * @param {Function(error, helper, next(value), controller)} fn
@@ -1239,6 +1311,15 @@ SchemaBuilderEntityProto.setRemove = function(fn, description, filter) {
 	this.meta.remove = description || null;
 	this.meta.removefilter = filter;
 	!fn.$newversion && OBSOLETE('Schema("{0}").setRemove()'.format(this.name), MSG_OBSOLETE_NEW);
+	return this;
+};
+
+SchemaBuilderEntityProto.setRemoveExtension = function(fn) {
+	var key = 'remove';
+	if (this.extensions[key])
+		this.extensions[key].push(fn);
+	else
+		this.extensions[key] = [fn];
 	return this;
 };
 
@@ -1290,6 +1371,15 @@ SchemaBuilderEntityProto.addTransform = function(name, fn, description, filter) 
 	return this;
 };
 
+SchemaBuilderEntityProto.addTransformExtension = function(name, fn) {
+	var key = 'transform.' + name;
+	if (this.extensions[key])
+		this.extensions[key].push(fn);
+	else
+		this.extensions[key] = [fn];
+	return this;
+};
+
 /**
  * Add a new operation for the entity
  * @param {String} name Operation name, optional.
@@ -1315,6 +1405,15 @@ SchemaBuilderEntityProto.addOperation = function(name, fn, description, filter) 
 	this.meta['operation#' + name] = description || null;
 	this.meta['operationfilter#' + name] = filter;
 	!fn.$newversion && OBSOLETE('Schema("{0}").addOperation("{1}")'.format(this.name, name), MSG_OBSOLETE_NEW);
+	return this;
+};
+
+SchemaBuilderEntityProto.addOperationExtension = function(name, fn) {
+	var key = 'operation.' + name;
+	if (this.extensions[key])
+		this.extensions[key].push(fn);
+	else
+		this.extensions[key] = [fn];
 	return this;
 };
 
@@ -1346,6 +1445,15 @@ SchemaBuilderEntityProto.addWorkflow = function(name, fn, description, filter) {
 	return this;
 };
 
+SchemaBuilderEntityProto.addWorkflowExtension = function(name, fn) {
+	var key = 'workflow.' + name;
+	if (this.extensions[key])
+		this.extensions[key].push(fn);
+	else
+		this.extensions[key] = [fn];
+	return this;
+};
+
 SchemaBuilderEntityProto.addHook = function(name, fn, description, filter) {
 
 	if (!this.hooks)
@@ -1362,6 +1470,15 @@ SchemaBuilderEntityProto.addHook = function(name, fn, description, filter) {
 	this.meta['hook#' + name] = description || null;
 	this.meta['hookfilter#' + name] = filter;
 	!fn.$newversion && OBSOLETE('Schema("{0}").addHook("{1}")'.format(this.name, name), MSG_OBSOLETE_NEW);
+	return this;
+};
+
+SchemaBuilderEntityProto.addHookExtension = function(name, fn) {
+	var key = 'hook.' + name;
+	if (this.extensions[key])
+		this.extensions[key].push(fn);
+	else
+		this.extensions[key] = [fn];
 	return this;
 };
 
@@ -2254,6 +2371,10 @@ SchemaBuilderEntityProto.prepare = function(model, dependencies, req) {
 							if (tmp && !type.required && !tmp.isJSON())
 								tmp = '';
 							break;
+						case 'base64':
+							if (tmp && !type.required && !tmp.isBase64())
+								tmp = '';
+							break;
 					}
 
 
@@ -2438,6 +2559,10 @@ SchemaBuilderEntityProto.prepare = function(model, dependencies, req) {
 							break;
 						case 'json':
 							if (tmp && !type.required && !tmp.isJSON())
+								continue;
+							break;
+						case 'base64':
+							if (tmp && !type.required && !tmp.isBase64())
 								continue;
 							break;
 					}
@@ -2816,7 +2941,7 @@ SchemaBuilderEntityProto.$execute = function(type, name, model, options, callbac
 	if (model && !controller && model.$$controller)
 		controller = model.$$controller;
 
-	var opfilter = [type + 'filter#' + name];
+	var opfilter = self.meta[type + 'filter#' + name];
 	if (opfilter && controller) {
 		controller.$filterschema = opfilter;
 		controller.$filter = null;
@@ -5617,17 +5742,21 @@ global.RUN = function(name, value, callback, param, controller, result) {
 			opt.repeated++;
 			setImmediate(opt => opt.$current(opt), opt);
 		} else {
+
 			if (opt.error.items.length) {
-				error.push(opt.error);
 				if (opt.$current.$binderror)
 					value = opt.error.output(false);
 			}
 
 			if (opt.error.items.length && opt.$current.$stop) {
+				error.push(opt.error);
 				name = null;
 				opt.next = null;
 				callback(error, opt.response, opt);
 			} else {
+
+				// Because "controller_json_workflow_multiple()" returns error instead of results
+				// error.push(opt.error);
 
 				if (result && (result === opt.meta.current || result === opt.name))
 					opt.output = value;
@@ -5986,6 +6115,9 @@ function convertorcompile(schema, data, key) {
 				break;
 			case 'capitalize2':
 				obj.fn = (val, obj) => $convertstring(val, obj).capitalize(true);
+				break;
+			case 'base64':
+				obj.fn = val => typeof(val) === 'string' ? val.isBase64() ? val : '' : '';
 				break;
 			case 'email':
 				obj.fn = function(val, obj) {
