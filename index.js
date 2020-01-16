@@ -21,7 +21,7 @@
 
 /**
  * @module Framework
- * @version 3.3.3
+ * @version 3.3.0
  */
 
 'use strict';
@@ -91,15 +91,14 @@ const CLUSTER_CACHE_SET = { TYPE: 'cache', method: 'set' };
 const CLUSTER_CACHE_REMOVE = { TYPE: 'cache', method: 'remove' };
 const CLUSTER_CACHE_REMOVEALL = { TYPE: 'cache', method: 'removeAll' };
 const CLUSTER_CACHE_CLEAR = { TYPE: 'cache', method: 'clear' };
-const CLUSTER_SNAPSHOT = { TYPE: 'snapshot' };
 const GZIPFILE = { memLevel: 9 };
 const GZIPSTREAM = { memLevel: 1 };
 const MODELERROR = {};
 const IMAGES = { jpg: 1, png: 1, gif: 1, apng: 1, jpeg: 1, heif: 1, heic: 1, webp: 1 };
+const PREFFILE = 'preferences.json';
 const KEYSLOCALIZE = { html: 1, htm: 1 };
 const PROXYOPTIONS = { end: true };
 const PROXYKEEPALIVE = new http.Agent({ keepAlive: true, timeout: 60000 });
-var PREFFILE = 'preferences.json';
 
 var PATHMODULES = require.resolve('./index');
 PATHMODULES = PATHMODULES.substring(0, PATHMODULES.length - 8);
@@ -111,7 +110,6 @@ Object.freeze(EMPTYREQUEST);
 global.EMPTYOBJECT = EMPTYOBJECT;
 global.EMPTYARRAY = EMPTYARRAY;
 global.NOW = new Date();
-global.THREAD = '';
 global.isWORKER = false;
 global.REQUIRE = function(path) {
 	return require(F.directory + '/' + path);
@@ -885,7 +883,6 @@ const controller_error_status = function(controller, status, problem) {
 	controller.req.$total_route = F.lookup(controller.req, '#' + status, EMPTYARRAY, 0);
 	controller.req.$total_exception = problem;
 	controller.req.$total_execute(status, true);
-
 	return controller;
 };
 
@@ -896,8 +893,8 @@ function Framework() {
 	var self = this;
 
 	self.$id = null; // F.id ==> property
-	self.version = 3330;
-	self.version_header = '3.3.3';
+	self.version = 3300;
+	self.version_header = '3.3.0-bulut4';
 	self.version_node = process.version.toString();
 	self.syshash = (__dirname + '-' + Os.hostname() + '-' + Os.platform() + '-' + Os.arch() + '-' + Os.release() + '-' + Os.tmpdir() + JSON.stringify(process.versions)).md5();
 	self.pref = global.PREF;
@@ -967,7 +964,7 @@ function Framework() {
 		default_websocket_maxlength: 2,
 		default_websocket_encodedecode: true,
 		default_maxopenfiles: 0,
-		default_timezone: 'utc',
+		default_timezone: '',
 		default_root: '',
 		default_response_maxage: '11111111',
 		default_errorbuilder_status: 200,
@@ -998,7 +995,6 @@ function Framework() {
 		allow_compile_style: true,
 		allow_compile_html: true,
 		allow_localize: true,
-		allow_stats_snapshot: true,
 		allow_performance: false,
 		allow_custom_titles: false,
 		allow_cache_snapshot: false,
@@ -1009,7 +1005,6 @@ function Framework() {
 		allow_clear_temp: true,
 		allow_ssc_validation: false,
 		allow_workers_silent: false,
-		allow_sessions_unused: '-20 minutes',
 
 		nosql_worker: false,
 		nosql_inmemory: null, // String Array
@@ -1689,17 +1684,12 @@ function nosqlwrapper(name) {
 	if (db)
 		return db;
 
-	// absolute
-	if (name[0] === '~') {
-		db = framework_nosql.load(U.getName(name), name.substring(1), true);
-	} else {
-		var is = name.substring(0, 6);
-		if (is === 'http:/' || is === 'https:')
-			db = framework_nosql.load(U.getName(name), name);
-		else {
-			F.path.verify('databases');
-			db = framework_nosql.load(name, F.path.databases(name));
-		}
+	var is = name.substring(0, 6);
+	if (is === 'http:/' || is === 'https:')
+		db = framework_nosql.load(U.getName(name), name);
+	else {
+		F.path.verify('databases');
+		db = framework_nosql.load(name, F.path.databases(name));
 	}
 
 	F.databases[name] = db;
@@ -1722,14 +1712,8 @@ function tablewrapper(name) {
 	var db = F.databases['$' + name];
 	if (db)
 		return db;
-
-	if (name[0] === '~') {
-		db = framework_nosql.load(U.getName(name), name.substring(1), true);
-	} else {
-		F.path.verify('databases');
-		db = framework_nosql.table(name, F.path.databases(name));
-	}
-
+	F.path.verify('databases');
+	db = framework_nosql.table(name, F.path.databases(name));
 	F.databases['$' + name] = db;
 	return db;
 }
@@ -1760,7 +1744,7 @@ F.stop = F.kill = function(signal) {
 
 	EMIT('exit', signal);
 
-	if (!F.isWorker && process.send && process.connected)
+	if (!F.isWorker && process.send)
 		TRY(() => process.send('total:stop'));
 
 	F.cache.stop();
@@ -4192,6 +4176,7 @@ F.$load = function(types, targetdirectory, callback, packageName) {
 		});
 	}
 
+
 	if (can('packages')) {
 		operations.push(function(resume) {
 			dir = U.combine(targetdirectory, isPackage ? '/packages/' : CONF.directory_packages);
@@ -4322,25 +4307,6 @@ F.$load = function(types, targetdirectory, callback, packageName) {
 			dir = U.combine(targetdirectory, isPackage ? '/components/' : CONF.directory_components);
 			listing(dir, 0, arr, '.html');
 			arr.forEach((item) => dependencies.push(next => F.install('component', item.name, item.filename, undefined, undefined, undefined, undefined, undefined, undefined, next, packageName)));
-			resume();
-		});
-	}
-
-	var thread = global.THREAD;
-	if (thread) {
-
-		// Updates PREF file
-		PREFFILE = PREFFILE.replace('.json', '_' + thread + '.json');
-
-		operations.push(function(resume) {
-			arr = [];
-			dir = '/threads/' + thread;
-			F.$configure_env(dir + '/.env');
-			F.$configure_configs(dir + '/config');
-			F.$configure_configs(dir + '/config-' + (DEBUG ? 'debug' : 'release'));
-			dir = U.combine(targetdirectory, '/threads/' + thread);
-			listing(dir, 0, arr);
-			arr.forEach(item => dependencies.push(next => F.install('module', 'threads/' + item.name, item.filename, undefined, undefined, undefined, true, undefined, undefined, next, packageName)));
 			resume();
 		});
 	}
@@ -5214,7 +5180,10 @@ global.INSTALL = F.install = function(type, name, declaration, options, callback
 			} else {
 				F.$configure_env('@' + name + '/.env');
 				F.$configure_configs('@' + name + '/config');
-				F.$configure_configs('@' + name + '/config-' + (DEBUG ? 'debug' : 'release'));
+				if (DEBUG)
+					F.$configure_configs('@' + name + '/config-debug');
+				else
+					F.$configure_configs('@' + name + '/config-release');
 				F.isTest && F.$configure_configs('@' + name + '/config-test');
 				F.$configure_versions('@' + name + '/versions');
 				F.$configure_dependencies('@' + name + '/dependencies');
@@ -6249,7 +6218,7 @@ global.LOGMAIL = F.logmail = function(address, subject, body, callback) {
 	if (!subject)
 		subject = CONF.name + ' v' + CONF.version;
 
-	var body = '<!DOCTYPE html><html><head><title>' + subject + '</title><meta charset="utf-8" /></head><body><pre style="max-width:600px;font-size:13px;line-height:16px;white-space:pre-line">' + (typeof(body) === 'object' ? JSON.stringify(body).escape() : body) + '</pre></body></html>';
+	var body = '<!DOCTYPE html><html><head><title>' + subject + '</title><meta charset="utf-8" /></head><body><pre style="max-width:600px;font-size:13px;line-height:16px">' + (typeof(body) === 'object' ? JSON.stringify(body).escape() : body) + '</pre></body></html>';
 	return F.onMail(address, subject, body, callback);
 };
 
@@ -7259,21 +7228,7 @@ global.LOAD = F.load = function(debug, types, pwd, ready) {
 				F.$configure_sitemap();
 
 			F.consoledebug('init');
-
-			var noservice = true;
-
-			for (var i = 0; i < types.length; i++) {
-				switch(types[i]) {
-					case 'service':
-					case 'services':
-						noservice = false;
-						break;
-				}
-				if (!noservice)
-					break;
-			}
-
-			F.cache.init(noservice);
+			F.cache.init(true);
 			EMIT('init');
 
 			F.$load(types, directory, function() {
@@ -7336,9 +7291,6 @@ F.initialize = function(http, debug, options) {
 	var port = options.port;
 	var ip = options.ip;
 	var listenpath = options.listenpath;
-
-	if (options.thread)
-		global.THREAD = options.thread;
 
 	options.config && U.extend_headers2(CONF, options.config);
 
@@ -7487,7 +7439,6 @@ F.initialize = function(http, debug, options) {
 					F.removeAllListeners('load');
 					F.removeAllListeners('ready');
 					options.package && INSTALL('package', options.package);
-					runsnapshot();
 				}, 500);
 
 				if (F.isTest) {
@@ -7707,32 +7658,13 @@ F.console = function() {
 	CONF.author && console.log('Author        : ' + CONF.author);
 	console.log('Date          : ' + NOW.format('yyyy-MM-dd HH:mm:ss'));
 	console.log('Mode          : ' + (DEBUG ? 'debug' : 'release'));
-	global.THREAD && console.log('Thread        : ' + global.THREAD);
 	console.log('====================================================');
 	CONF.default_root && console.log('Root          : ' + F.config.default_root);
 	console.log('Directory     : ' + process.cwd());
 	console.log('node_modules  : ' + PATHMODULES);
 	console.log('====================================================\n');
-
 	if (!F.isWorker) {
-
-		var hostname = '{2}://{0}:{1}/'.format(F.ip, F.port, F.isHTTPS ? 'https' : 'http');
-
-		if (F.ip === '0.0.0.0') {
-			var ni = Os.networkInterfaces();
-			if (ni.en0) {
-				for (var i = 0; i < ni.en0.length; i++) {
-					var nii = ni.en0[i];
-					// nii.family === 'IPv6' ||
-					if (nii.family === 'IPv4') {
-						hostname += '\n{2}://{0}:{1}/'.format(nii.address, F.port, F.isHTTPS ? 'https' : 'http');
-						break;
-					}
-				}
-			}
-		}
-
-		console.log(hostname);
+		console.log('{2}://{0}:{1}/'.format(F.ip, F.port, F.isHTTPS ? 'https' : 'http'));
 		console.log('');
 	}
 };
@@ -7827,10 +7759,7 @@ F.service = function(count) {
 		keys = Object.keys(F.sessions);
 		for (var i = 0; i < keys.length; i++) {
 			var key = keys[i];
-			if (F.sessions[key]) {
-				F.sessions[key].clean();
-				CONF.allow_sessions_unused && F.sessions[key].releaseunused(CONF.allow_sessions_unused);
-			}
+			F.sessions[key] && F.sessions[key].clean();
 		}
 	}
 
@@ -8109,9 +8038,6 @@ function makeproxycallback(response) {
 	response.pipe(this.$res, PROXYOPTIONS);
 }
 
-
-const TRAVELCHARS = { e: 1, E: 1 };
-
 /**
  * Continue to process
  * @private
@@ -8136,10 +8062,10 @@ F.$requestcontinue = function(req, res, headers) {
 		if (!tmp) {
 			// Stops path travelsation outside of "public" directory
 			// A potential security issue
-			for (var i = 0; i < req.uri.pathname.length - 1; i++) {
+			for (var i = 0; i < req.uri.pathname.length; i++) {
 				var c = req.uri.pathname[i];
 				var n = req.uri.pathname[i + 1];
-				if ((c === '.' && (n === '/' || n === '%')) || (c === '%' && n === '2' && TRAVELCHARS[req.uri.pathname[i + 2]])) {
+				if ((c === '.' && (n === '/' || n === '%')) || (c === '%' && n === '2' && req.uri.pathname[i + 2] === 'e')) {
 					F.temporary.shortcache[req.uri.pathname] = 2;
 					req.$total_status(404);
 					return;
@@ -8152,7 +8078,6 @@ F.$requestcontinue = function(req, res, headers) {
 		}
 
 		F.stats.request.file++;
-
 		if (F._length_files)
 			req.$total_file();
 		else
@@ -8503,15 +8428,13 @@ F.$upgrade = function(req, socket, head) {
 
 	if ((req.headers.upgrade || '').toLowerCase() !== 'websocket' || F._length_wait)
 		return;
-
+	F.consoledebug('Websocket is here.');
 	// disables timeout
 	socket.setTimeout(0);
 	socket.on('error', NOOP);
 
 	var headers = req.headers;
 	req.$protocol = req.connection.encrypted || headers['x-forwarded-protocol'] === 'https' ? 'https' : 'http';
-
-	console.log('WS:', headers);
 
 	req.uri = framework_internal.parseURI(req);
 
@@ -8572,13 +8495,15 @@ function websocketcontinue_authnew(isAuthorized, user, $) {
 
 F.$websocketcontinue = function(req, path) {
 	req.websocketpath = path;
+	F.consoledebug('Websocket authorization check.');
 	if (F.onAuthorize) {
 		if (F.onAuthorize.$newversion) {
+			F.consoledebug('Websocket new version authorization');
 			F.onAuthorize(req, req.websocket, req.flags, websocketcontinue_authnew);
 		} else {
 			// @TODO: remove in v4
 			F.onAuthorize.call(F, req, req.websocket, req.flags, function(isAuthorized, user) {
-
+				F.consoledebug('Websocket old system authorization process.');
 				if (!F.onAuthorize.isobsolete) {
 					F.onAuthorize.isobsolete = 1;
 					OBSOLETE('F.onAuthorize', 'You need to use a new authorization declaration: "AUTH(function($) {})"');
@@ -8601,6 +8526,7 @@ F.$websocketcontinue = function(req, path) {
 
 				if (user)
 					req.user = user;
+				F.consoledebug('Going to lookup_websocket');
 				var route = F.lookup_websocket(req, req.websocket.uri.pathname, isAuthorized ? 1 : 2);
 				if (route) {
 					F.$websocketcontinue_process(route, req, path);
@@ -8609,6 +8535,8 @@ F.$websocketcontinue = function(req, path) {
 			});
 		}
 	} else {
+		F.consoledebug('Websocket authorization is none.');
+		F.consoledebug('Going to lookup_websocket');
 		var route = F.lookup_websocket(req, req.websocket.uri.pathname, 0);
 		if (route) {
 			F.$websocketcontinue_process(route, req, path);
@@ -9800,10 +9728,11 @@ F.$configure_configs = function(arr, rewrite) {
 
 		var filenameA = U.combine('/', 'config');
 		var filenameB = U.combine('/', 'config-' + (DEBUG ? 'debug' : 'release'));
+
 		arr = [];
 
 		// read all files from "configs" directory
-		var configs = PATH.configs();
+		var configs = F.path.configs();
 		if (existsSync(configs)) {
 			var tmp = Fs.readdirSync(configs);
 			for (var i = 0, length = tmp.length; i < length; i++) {
@@ -9847,7 +9776,6 @@ F.$configure_configs = function(arr, rewrite) {
 	var tmp;
 	var subtype;
 	var value;
-	var generated = [];
 
 	for (var i = 0; i < length; i++) {
 		var str = arr[i];
@@ -10127,12 +10055,7 @@ F.$configure_configs = function(arr, rewrite) {
 					obj[name] = value.parseDate();
 				else if (subtype === 'env' || subtype === 'environment')
 					obj[name] = process.env[value];
-				else if (subtype === 'random')
-					obj[name] = GUID(value || 10);
-				else if (subtype === 'generate') {
-					obj[name] = GUID(value || 10);
-					generated.push(name);
-				} else {
+				else {
 					if (value.isNumber()) {
 						obj[name] = value[0] !== '0' ? U.parseInt(value) : value;
 					} else if (value.isNumber(true))
@@ -10144,33 +10067,12 @@ F.$configure_configs = function(arr, rewrite) {
 		}
 	}
 
-	// Cache for generated passwords
-	if (generated && generated.length) {
-		var filenameC = U.combine('/databases/', 'config{0}.json'.format(global.THREAD ? ('_' + global.THREAD) : ''));
-		var gdata;
-
-		if (existsSync(filenameC)) {
-			gdata = Fs.readFileSync(filenameC).toString('utf8').parseJSON(true);
-			for (var i = 0; i < generated.length; i++) {
-				if (gdata[generated[i]] != null)
-					obj[generated[i]] = gdata[generated[i]];
-			}
-		}
-
-		tmp = {};
-		for (var i = 0; i < generated.length; i++)
-			tmp[generated[i]] = obj[generated[i]];
-
-		PATH.verify('databases');
-		Fs.writeFileSync(filenameC, JSON.stringify(tmp), NOOP);
-	}
-
 	U.extend(CONF, obj, rewrite);
 
 	if (!CONF.secret_uid)
 		CONF.secret_uid = (CONF.name).crc32(true).toString();
 
-	tmp = CONF.mail_smtp_options;
+	var tmp = CONF.mail_smtp_options;
 	if (typeof(tmp) === 'string' && tmp) {
 		tmp = new Function('return ' + tmp)();
 		CONF.mail_smtp_options = tmp;
@@ -10560,7 +10462,7 @@ F.lookup_websocket = function(req, url, membertype) {
 			if (result < 1)
 				continue;
 		}
-
+		F.consoledebug('Websocket lookup; Route object:' + JSON.stringify(route));
 		return route;
 	}
 
@@ -10941,18 +10843,6 @@ FrameworkPathProto.modules = function(filename) {
 	return U.combine(CONF.directory_modules, filename);
 };
 
-FrameworkPathProto.schemas = function(filename) {
-	return U.combine(CONF.directory_schemas, filename);
-};
-
-FrameworkPathProto.operations = function(filename) {
-	return U.combine(CONF.directory_operations, filename);
-};
-
-FrameworkPathProto.tasks = function(filename) {
-	return U.combine(CONF.directory_tasks, filename);
-};
-
 FrameworkPathProto.controllers = function(filename) {
 	return U.combine(CONF.directory_controllers, filename);
 };
@@ -11035,8 +10925,7 @@ FrameworkCacheProto.init = function(notimer) {
 FrameworkCacheProto.init_timer = function() {
 	var self = this;
 	self.interval && clearInterval(self.interval);
-	// self.interval = setInterval(() => F.cache.recycle(), 1000 * 60);
-	self.interval = setInterval(() => F.cache.recycle(), 5000);
+	self.interval = setInterval(() => F.cache.recycle(), 1000 * 60);
 	return self;
 };
 
@@ -11132,7 +11021,6 @@ FrameworkCacheProto.recycle = function() {
 	persistent && this.savepersistent();
 	CONF.allow_cache_snapshot && this.save();
 	F.service(this.count);
-	CONF.allow_stats_snapshot && F.snapshotstats();
 	return this;
 };
 
@@ -11400,6 +11288,7 @@ Controller.prototype = {
 		this.req.body = val;
 	},
 
+	// Eklenenler
 	get get() {
 		return this.req.query;
 	},
@@ -13203,8 +13092,6 @@ ControllerProto.$absolute = function(files, base) {
 	return self.public(files, base);
 };
 
-var $importmergecache = {};
-
 ControllerProto.$import = function() {
 
 	var self = this;
@@ -13246,69 +13133,23 @@ ControllerProto.$import = function() {
 			continue;
 		}
 
-		var k = 'import#' + filename;
-
-		if (F.temporary.other[k]) {
-			builder += F.temporary.other[k];
-			continue;
-		}
-
-		var ext;
-
-		if (filename.indexOf('+') !== -1) {
-
-			// MERGE
-			var merge = filename.split('+');
-			var hash = 'merge' + filename.hash(true);
-
-			if ($importmergecache[hash]) {
-				builder += F.temporary.other[k] = $importmergecache[hash];
-				continue;
-			}
-
-			merge[0] = merge[0].trim();
-			var index = merge[0].lastIndexOf('.');
-			var mergename = merge[0];
-			var crc = 0;
-
-			ext = U.getExtension(merge[0]);
-			merge[0] = ext === 'css' ? self.public_css(merge[0]) : self.public_js(merge[0]);
-
-			for (var j = 1; j < merge.length; j++) {
-				merge[j] = merge[j].trim();
-				merge[j] = ext === 'css' ? self.public_css(merge[j]) : self.public_js(merge[j]);
-				crc += merge[j].crc32(true);
-			}
-
-			var outputname = mergename.substring(0, index) + crc + mergename.substring(index);
-			outputname = ext === 'css' ? self.public_css(outputname) : self.public_js(outputname);
-
-			var tmp = ext === 'css' ? self.public_css(outputname, true) : self.public_js(outputname, true);
-			$importmergecache[hash] = F.temporary.other[k] = tmp;
-
-			merge.unshift(outputname);
-			MERGE.apply(global, merge);
-			builder += tmp;
-			continue;
-		}
-
-		ext = filename.substring(filename.lastIndexOf('.'));
+		var extension = filename.substring(filename.lastIndexOf('.'));
 		var tag = filename[0] !== '!';
 		if (!tag)
 			filename = filename.substring(1);
 
 		if (filename[0] === '#')
-			ext = '.js';
+			extension = '.js';
 
-		switch (ext) {
+		switch (extension) {
 			case '.js':
-				builder += F.temporary.other[k] = self.public_js(filename, tag);
+				builder += self.public_js(filename, tag);
 				break;
 			case '.css':
-				builder += F.temporary.other[k] = self.public_css(filename, tag);
+				builder += self.public_css(filename, tag);
 				break;
 			case '.ico':
-				builder += F.temporary.other[k] = self.$favicon(filename);
+				builder += self.$favicon(filename);
 				break;
 			case '.jpg':
 			case '.gif':
@@ -13319,7 +13160,7 @@ ControllerProto.$import = function() {
 			case '.webp':
 			case '.heic':
 			case '.apng':
-				builder += F.temporary.other[k] = self.public_image(filename);
+				builder += self.public_image(filename);
 				break;
 			case '.mp4':
 			case '.avi':
@@ -13330,10 +13171,10 @@ ControllerProto.$import = function() {
 			case '.mpe':
 			case '.mpeg':
 			case '.m4v':
-				builder += F.temporary.other[k] = self.public_video(filename);
+				builder += self.public_video(filename);
 				break;
 			default:
-				builder += F.temporary.other[k] = self.public(filename);
+				builder += self.public(filename);
 				break;
 		}
 	}
@@ -14005,34 +13846,33 @@ ControllerProto.file = function(filename, download, headers, done) {
 	res.options.download = download;
 	res.options.headers = headers;
 	res.options.callback = done;
-
 	res.$file();
 	return this;
 };
 
-ControllerProto.filefs = function(name, id, download, headers, callback, checkmeta) {
+ControllerProto.filefs = function(name, id, download, headers, callback) {
 	var self = this;
 	var options = {};
 	options.id = id;
 	options.download = download;
 	options.headers = headers;
 	options.done = callback;
-	FILESTORAGE(name).res(self.res, options, checkmeta, $file_notmodified);
+	FILESTORAGE(name).res(self.res, options, $file_notmodified);
 	return self;
 };
 
-ControllerProto.filenosql = function(name, id, download, headers, callback, checkmeta) {
+ControllerProto.filenosql = function(name, id, download, headers, callback) {
 	var self = this;
 	var options = {};
 	options.id = id;
 	options.download = download;
 	options.headers = headers;
 	options.done = callback;
-	NOSQL(name).binary.res(self.res, options, checkmeta, $file_notmodified);
+	NOSQL(name).binary.res(self.res, options, $file_notmodified);
 	return self;
 };
 
-ControllerProto.imagefs = function(name, id, make, headers, callback, checkmeta) {
+ControllerProto.imagefs = function(name, id, make, headers, callback) {
 	var self = this;
 	var options = {};
 	options.id = id;
@@ -14040,11 +13880,11 @@ ControllerProto.imagefs = function(name, id, make, headers, callback, checkmeta)
 	options.make = make;
 	options.headers = headers;
 	options.done = callback;
-	FILESTORAGE(name).res(self.res, options, checkmeta, $file_notmodified);
+	FILESTORAGE(name).res(self.res, options, $file_notmodified);
 	return self;
 };
 
-ControllerProto.imagenosql = function(name, id, make, headers, callback, checkmeta) {
+ControllerProto.imagenosql = function(name, id, make, headers, callback) {
 	var self = this;
 	var options = {};
 	options.id = id;
@@ -14052,7 +13892,7 @@ ControllerProto.imagenosql = function(name, id, make, headers, callback, checkme
 	options.make = make;
 	options.headers = headers;
 	options.done = callback;
-	NOSQL(name).binary.res(self.res, options, checkmeta, $file_notmodified);
+	NOSQL(name).binary.res(self.res, options, $file_notmodified);
 	return self;
 };
 
@@ -15026,10 +14866,6 @@ WebSocket.prototype = {
 			this.$params = EMPTYOBJECT;
 			return EMPTYOBJECT;
 		}
-	},
-
-	get keys() {
-		return this._keys;
 	}
 };
 
@@ -15226,6 +15062,7 @@ WebSocketProto.ping = function() {
  */
 WebSocketProto.close = function(id, message, code) {
 
+	F.consoledebug(`${id} websocket kapandı: ${code}`);
 	var keys = this._keys;
 
 	if (!keys)
@@ -16106,7 +15943,6 @@ WebSocketClientProto.close = function(message, code) {
 			self.socket.end(U.getWebSocketFrame(code || 1000, message ? (CONF.default_websocket_encodedecode ? encodeURIComponent(message) : message) : '', 0x08));
 		else
 			self.socket.end();
-		throw new Error('PROBLEM');
 		self.req.connection.destroy();
 	}
 	return self;
@@ -16371,7 +16207,7 @@ function extend_request(PROTO) {
 		}
 
 		F.onAuthorize(req, req.res, req.flags || [], function(isAuthorized, user) {
-
+			F.consoledebug('PROTO.authorize running');
 			if (!F.onAuthorize.isobsolete) {
 				F.onAuthorize.isobsolete = 1;
 				OBSOLETE('F.onAuthorize', 'You need to use a new authorization declaration: "AUTH(function($) {})"');
@@ -16517,10 +16353,8 @@ function extend_request(PROTO) {
 		var res = this.res;
 
 		if (isError || !route) {
-			var key = 'error' + status;
-			F.stats.response[key]++;
-			status !== 500 && F.$events.error && EMIT('error', this, res, this.$total_exception);
-			F.$events[key] && EMIT(key, this, res, this.$total_exception);
+			F.stats.response['error' + status]++;
+			status !== 500 && F.$events.error && EMIT('error' + status, this, res, this.$total_exception);
 		}
 
 		if (!route) {
@@ -16906,7 +16740,7 @@ function extend_request(PROTO) {
 				req.$total_route = F.lookup(req, '#404', EMPTYARRAY, 0);
 			var code = req.buffer_exceeded ? 431 : 404;
 			if (!req.$total_schema || !req.$total_route)
-				req.$total_execute(code, code);
+				req.$total_execute(code);
 			else
 				req.$total_validate(req.$total_route, subscribe_validate_callback, code);
 		}
@@ -17202,29 +17036,29 @@ function extend_response(PROTO) {
 	 * @param {Function} done Optional, callback.
 	 * @return {Framework}
 	 */
-	PROTO.filefs = function(name, id, download, headers, callback, checkmeta) {
+	PROTO.filefs = function(name, id, download, headers, callback) {
 		var self = this;
 		var options = {};
 		options.id = id;
 		options.download = download;
 		options.headers = headers;
 		options.done = callback;
-		FILESTORAGE(name).res(self, options, checkmeta, $file_notmodified);
+		FILESTORAGE(name).res(self, options, $file_notmodified);
 		return self;
 	};
 
-	PROTO.filenosql = function(name, id, download, headers, callback, checkmeta) {
+	PROTO.filenosql = function(name, id, download, headers, callback) {
 		var self = this;
 		var options = {};
 		options.id = id;
 		options.download = download;
 		options.headers = headers;
 		options.done = callback;
-		NOSQL(name).binary.res(self, options, checkmeta, $file_notmodified);
+		NOSQL(name).binary.res(self, options, $file_notmodified);
 		return self;
 	};
 
-	PROTO.imagefs = function(name, id, make, headers, callback, checkmeta) {
+	PROTO.imagefs = function(name, id, make, headers, callback) {
 		var self = this;
 		var options = {};
 		options.id = id;
@@ -17232,11 +17066,11 @@ function extend_response(PROTO) {
 		options.make = make;
 		options.headers = headers;
 		options.done = callback;
-		FILESTORAGE(name).res(self, options, checkmeta, $file_notmodified);
+		FILESTORAGE(name).res(self, options, $file_notmodified);
 		return self;
 	};
 
-	PROTO.imagenosql = function(name, id, make, headers, callback, checkmeta) {
+	PROTO.imagenosql = function(name, id, make, headers, callback) {
 		var self = this;
 		var options = {};
 		options.id = id;
@@ -17244,7 +17078,7 @@ function extend_response(PROTO) {
 		options.make = make;
 		options.headers = headers;
 		options.done = callback;
-		NOSQL(name).binary.res(self, options, checkmeta, $file_notmodified);
+		NOSQL(name).binary.res(self, options, $file_notmodified);
 		return self;
 	};
 
@@ -17558,15 +17392,11 @@ function extend_response(PROTO) {
 
 		!req.$key && (req.$key = createTemporaryKey(req));
 
-		// "$keyskip" solves a problem with handling files in 404 state
-		if (!req.$keyskip) {
-			if (F.temporary.notfound[req.$key]) {
-				req.$keyskip = true;
-				DEBUG && (F.temporary.notfound[req.$key] = undefined);
-				if (!F.routes.filesfallback || !F.routes.filesfallback(req, res))
-					res.throw404();
-				return res;
-			}
+		if (F.temporary.notfound[req.$key]) {
+			DEBUG && (F.temporary.notfound[req.$key] = undefined);
+			if (!F.routes.filesfallback || !F.routes.filesfallback(req, res))
+				res.throw404();
+			return res;
 		}
 
 		// Is package?
@@ -18504,20 +18334,15 @@ process.on('SIGTERM', forcestop);
 process.on('SIGINT', forcestop);
 process.on('exit', forcestop);
 
-function process_ping() {
-	process.connected && process.send('total:ping');
-}
-
 process.on('message', function(msg, h) {
 	if (msg === 'total:debug') {
 		U.wait(() => F.isLoaded, function() {
+
 			F.isLoaded = undefined;
 			F.console();
 		}, 10000, 500);
 	} else if (msg === 'reconnect')
 		F.reconnect();
-	else if (msg === 'total:ping')
-		setImmediate(process_ping);
 	else if (msg === 'reset')
 		F.cache.clear();
 	else if (msg === 'stop' || msg === 'exit' || msg === 'kill')
@@ -19000,7 +18825,7 @@ function controller_json_workflow_multiple(id) {
 
 			// IS IT AN OPERATION?
 			if (!self.route.schema.length) {
-				RUN(w.id, self.body, w.view ? self.callback(w.view) : self.callback(), null, self, w.index != null ? w.id[w.index] : null);
+				RUN(w.id, self.body, w.view ? self.callback(w.view) : self.callback(), null, self, w.index ? w.id[w.index] : null);
 				return;
 			}
 
@@ -19183,44 +19008,6 @@ global.ACTION = function(url, data, callback) {
 	setImmediate(evalroutehandler, controller);
 	return controller;
 };
-
-function runsnapshot() {
-
-	var main = {};
-	var stats = {};
-	stats.id = F.id;
-	stats.version = {};
-	stats.version.node = process.version;
-	stats.version.total = F.version_header;
-	stats.version.app = CONF.version;
-	stats.pid = process.pid;
-	stats.thread = global.THREAD;
-	stats.mode = DEBUG ? 'debug' : 'release';
-
-	main.pid = process.pid;
-	main.stats = [stats];
-
-	F.snapshotstats = function() {
-
-		var memory = process.memoryUsage();
-		stats.date = NOW;
-		stats.memory = (memory.heapUsed / 1024 / 1024).floor(2);
-		stats.rm = F.stats.performance.request.floor(2); // request min
-		stats.fm = F.stats.performance.file.floor(2);    // files min
-		stats.requests = F.stats.request.request;
-		stats.pending = F.stats.request.pending;
-		stats.errors = F.errors.length;
-		stats.timeout = F.stats.response.error408;
-
-		if (F.isCluster) {
-			if (process.connected) {
-				CLUSTER_SNAPSHOT.data = stats;
-				process.send(CLUSTER_SNAPSHOT);
-			}
-		} else
-			Fs.writeFile(process.mainModule.filename + '.json', JSON.stringify(main, null, '  '), NOOP);
-	};
-}
 
 // Because of controller prototypes
 // It's used in VIEW() and VIEWCOMPILE()
