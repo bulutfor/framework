@@ -7126,6 +7126,17 @@ F.response503 = function(req, res) {
 	return F;
 };
 
+//TODO: Biz ekledik.
+F.responseContent = function(req, res, code, body, type, compress, headers) {
+	res.options.code = code;
+	res.options.body = body;
+	res.options.type = type;
+	res.options.compress = compress === undefined || compress === true;
+	res.options.headers = headers;
+	res.$text();
+	return F;
+};
+
 global.LOAD = F.load = function(debug, types, pwd, ready) {
 
 	if (typeof(types) === 'function') {
